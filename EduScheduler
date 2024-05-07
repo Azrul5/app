@@ -1,0 +1,561 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+class Subject {
+  final String name;
+  final String day;
+  final TimeOfDay time; // Changed type to TimeOfDay for time
+  final String category;
+
+  Subject({
+    required this.name,
+    required this.day,
+    required this.time,
+    required this.category,
+  });
+}
+
+class StudentScheduleOrganizerScreen extends StatefulWidget {
+  @override
+  _StudentScheduleOrganizerScreenState createState() =>
+      _StudentScheduleOrganizerScreenState();
+}
+
+class _StudentScheduleOrganizerScreenState
+    extends State<StudentScheduleOrganizerScreen> {
+  final List<Subject> subjects = [];
+  bool isDarkModeEnabled = false;
+  final List<String> categories = ['Academic', 'Extracurricular', 'Personal'];
+  String selectedCategory = 'Academic';
+  TextEditingController searchController = TextEditingController();
+  String selectedDay = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSubjects();
+  }
+
+  void _showSubjectDetails(Subject subject) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Subject Details'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Name: ${subject.name}'),
+              Text('Day: ${subject.day}'),
+              Text('Time: ${subject.time.format(context)}'), // Format time
+              Text('Category: ${subject.category}'),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false, // Remove debug banner
+      theme: isDarkModeEnabled ? ThemeData.dark() : ThemeData.light(),
+      darkTheme: ThemeData.dark(),
+      themeMode: isDarkModeEnabled ? ThemeMode.dark : ThemeMode.light,
+      home: Scaffold(
+        appBar: AppBar(
+          title: Text('EduScheduler'),
+          actions: [
+            IconButton(
+              icon: Icon(Icons.search),
+              onPressed: () {
+                showSearch(
+                  context: context,
+                  delegate: SubjectSearchDelegate(subjects),
+                );
+              },
+            ),
+            PopupMenuButton<String>(
+              onSelected: (String value) {
+                setState(() {
+                  selectedDay = value;
+                });
+              },
+              itemBuilder: (BuildContext context) {
+                return <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: '',
+                    child: Text('All Days'),
+                  ),
+                  for (String day in _getDays())
+                    PopupMenuItem<String>(
+                      value: day,
+                      child: Text(day),
+                    ),
+                ];
+              },
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            for (String category in categories)
+              _buildCategoryExpansionTile(category),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ElevatedButton(
+                onPressed: _addSubject,
+                child: Text('Add Subject'),
+              ),
+            ),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          onPressed: _toggleDarkMode,
+          child: Icon(Icons.lightbulb),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCategoryExpansionTile(String category) {
+    List<Subject> categorySubjects = subjects
+        .where((subject) =>
+            subject.category == category &&
+            (selectedDay.isEmpty || subject.day == selectedDay))
+        .toList();
+
+    Color categoryColor = Colors.transparent; // Default color
+
+    // Set background color based on category
+    switch (category) {
+      case 'Personal':
+        categoryColor = Colors.purple[200]!;
+        break;
+      case 'Extracurricular':
+        categoryColor = Colors.purple[200]!;
+        break;
+      case 'Academic':
+        categoryColor = Colors.purple[200]!;
+        break;
+      default:
+        categoryColor = Colors.transparent;
+    }
+
+    return Container(
+      color: categoryColor, // Apply the background color
+      child: ExpansionTile(
+        title: Text(category),
+        children: [
+          ListView.builder(
+            shrinkWrap: true,
+            physics: ClampingScrollPhysics(),
+            itemCount: categorySubjects.length,
+            itemBuilder: (context, index) {
+              final subject = categorySubjects[index];
+              return ListTile(
+                title: Text(subject.name),
+                subtitle:
+                    Text('${subject.day}, ${subject.time.format(context)}'),
+                onTap: () => _showSubjectDetails(subject),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: Icon(Icons.edit),
+                      onPressed: () => _editSubject(context, index),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.delete),
+                      onPressed: () => _deleteSubject(index),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.notifications),
+                      onPressed: () => _scheduleReminder(subject),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _addSubject() async {
+    final Subject? newSubject = await showDialog<Subject>(
+      context: context,
+      builder: (context) {
+        String name = '';
+        String day = '';
+        TimeOfDay time = TimeOfDay.now(); // Default time
+
+        return AlertDialog(
+          title: Text('Add Subject'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: InputDecoration(labelText: 'Subject Name'),
+                onChanged: (value) => name = value,
+              ),
+              TextField(
+                decoration: InputDecoration(labelText: 'Day (e.g., Monday)'),
+                onChanged: (value) => day = value,
+              ),
+              Row(
+                children: [
+                  Text('Time: '),
+                  TextButton(
+                    onPressed: () async {
+                      final selectedTime = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay.now(),
+                      );
+                      if (selectedTime != null) {
+                        setState(() {
+                          time = selectedTime;
+                        });
+                      }
+                    },
+                    child: Text(time.format(context)),
+                  ),
+                ],
+              ),
+              DropdownButtonFormField<String>(
+                value: selectedCategory,
+                items: categories.map((String category) {
+                  return DropdownMenuItem<String>(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList(),
+                onChanged: (String? value) {
+                  if (value != null) {
+                    setState(() {
+                      selectedCategory = value;
+                    });
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (name.isNotEmpty && day.isNotEmpty) {
+                  Navigator.pop(
+                    context,
+                    Subject(
+                      name: name,
+                      day: day,
+                      time: time,
+                      category: selectedCategory,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please fill in all fields')),
+                  );
+                }
+              },
+              child: Text('Add'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newSubject != null) {
+      setState(() {
+        subjects.add(newSubject);
+        _saveSubjects();
+      });
+    }
+  }
+
+  void _editSubject(BuildContext context, int index) async {
+    final Subject? editedSubject = await showDialog<Subject>(
+      context: context,
+      builder: (context) {
+        Subject subject = _filteredSubjects()[index];
+        String name = subject.name;
+        String day = subject.day;
+        TimeOfDay time = subject.time;
+        selectedCategory = subject.category;
+
+        return AlertDialog(
+          title: Text('Edit Subject'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: InputDecoration(labelText: 'Subject Name'),
+                controller: TextEditingController(text: name),
+                onChanged: (value) => name = value,
+              ),
+              TextField(
+                decoration: InputDecoration(labelText: 'Day (e.g., Monday)'),
+                controller: TextEditingController(text: day),
+                onChanged: (value) => day = value,
+              ),
+              Row(
+                children: [
+                  Text('Time: '),
+                  TextButton(
+                    onPressed: () async {
+                      final selectedTime = await showTimePicker(
+                        context: context,
+                        initialTime: time,
+                      );
+                      if (selectedTime != null) {
+                        setState(() {
+                          time = selectedTime;
+                        });
+                      }
+                    },
+                    child: Text(time.format(context)),
+                  ),
+                ],
+              ),
+              DropdownButtonFormField<String>(
+                value: selectedCategory,
+                items: categories.map((String category) {
+                  return DropdownMenuItem<String>(
+                    value: category,
+                    child: Text(category),
+                  );
+                }).toList(),
+                onChanged: (String? value) {
+                  if (value != null) {
+                    setState(() {
+                      selectedCategory = value;
+                    });
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (name.isNotEmpty && day.isNotEmpty) {
+                  Navigator.pop(
+                    context,
+                    Subject(
+                      name: name,
+                      day: day,
+                      time: time,
+                      category: selectedCategory,
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Please fill in all fields')),
+                  );
+                }
+              },
+              child: Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (editedSubject != null) {
+      setState(() {
+        subjects[index] = editedSubject;
+        _saveSubjects();
+      });
+    }
+  }
+
+  void _deleteSubject(int index) {
+    setState(() {
+      subjects.removeAt(index);
+      _saveSubjects();
+    });
+  }
+
+  void _toggleDarkMode() {
+    setState(() {
+      isDarkModeEnabled = !isDarkModeEnabled;
+    });
+  }
+
+  Future<void> _loadSubjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String>? subjectsData = prefs.getStringList('subjects');
+
+    if (subjectsData != null) {
+      setState(() {
+        subjects.clear();
+        for (final subjectData in subjectsData) {
+          final parts = subjectData.split(',');
+          subjects.add(Subject(
+            name: parts[0],
+            day: parts[1],
+            time: TimeOfDay(
+              hour: int.parse(parts[2].split(':')[0]),
+              minute: int.parse(parts[2].split(':')[1]),
+            ),
+            category: parts[3],
+          ));
+        }
+      });
+    }
+  }
+
+  Future<void> _saveSubjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> subjectsData = subjects
+        .map((subject) =>
+            '${subject.name},${subject.day},${subject.time.hour}:${subject.time.minute},${subject.category}')
+        .toList();
+    await prefs.setStringList('subjects', subjectsData);
+  }
+
+  void _scheduleReminder(Subject subject) {
+    // Add your reminder scheduling logic here
+  }
+
+  List<String> _getDays() {
+    return [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday'
+    ];
+  }
+
+  List<Subject> _filteredSubjects() {
+    if (selectedDay.isEmpty) {
+      return subjects
+          .where((subject) => subject.category == selectedCategory)
+          .toList();
+    } else {
+      return subjects
+          .where((subject) =>
+              subject.day == selectedDay &&
+              subject.category == selectedCategory)
+          .toList();
+    }
+  }
+}
+
+class SubjectSearchDelegate extends SearchDelegate<Subject> {
+  final List<Subject> subjects;
+
+  SubjectSearchDelegate(this.subjects);
+
+  @override
+  List<Widget> buildActions(BuildContext context) {
+    return [
+      IconButton(
+        icon: Icon(Icons.clear),
+        onPressed: () {
+          query = '';
+        },
+      )
+    ];
+  }
+
+  @override
+  Widget buildLeading(BuildContext context) {
+    return IconButton(
+      icon: Icon(Icons.arrow_back),
+      onPressed: () {
+        close(
+            context,
+            Subject(
+                name: '',
+                day: '',
+                time: TimeOfDay(hour: 0, minute: 0),
+                category: ''));
+      },
+    );
+  }
+
+  @override
+  Widget buildResults(BuildContext context) {
+    final List<Subject> searchResults = subjects
+        .where((subject) =>
+            subject.name.toLowerCase().contains(query.toLowerCase()) ||
+            subject.day.toLowerCase().contains(query.toLowerCase()) ||
+            subject.time
+                .format(context)
+                .toLowerCase()
+                .contains(query.toLowerCase()))
+        .toList();
+
+    return ListView.builder(
+      itemCount: searchResults.length,
+      itemBuilder: (context, index) {
+        final subject = searchResults[index];
+        return ListTile(
+          title: Text(subject.name),
+          subtitle: Text('${subject.day}, ${subject.time.format(context)}'),
+          onTap: () {
+            close(context, subject);
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget buildSuggestions(BuildContext context) {
+    final List<Subject> searchResults = subjects
+        .where((subject) =>
+            subject.name.toLowerCase().contains(query.toLowerCase()) ||
+            subject.day.toLowerCase().contains(query.toLowerCase()) ||
+            subject.time
+                .format(context)
+                .toLowerCase()
+                .contains(query.toLowerCase()))
+        .toList();
+
+    return ListView.builder(
+      itemCount: searchResults.length,
+      itemBuilder: (context, index) {
+        final subject = searchResults[index];
+        return ListTile(
+          title: Text(subject.name),
+          subtitle: Text('${subject.day}, ${subject.time.format(context)}'),
+          onTap: () {
+            close(context, subject);
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  String get searchFieldLabel => 'Search subjects';
+}
+
+void main() {
+  runApp(MaterialApp(
+    home: StudentScheduleOrganizerScreen(),
+  ));
+}
